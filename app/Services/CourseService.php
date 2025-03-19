@@ -2,93 +2,249 @@
 
 namespace App\Services;
 
+use App\Models\Course;
 use App\Repositories\Interfaces\CourseRepositoryInterface;
+use App\Repositories\Interfaces\TagRepositoryInterface;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 
 class CourseService
 {
+    /**
+     * @var CourseRepositoryInterface
+     */
     protected $courseRepository;
 
-    public function __construct(CourseRepositoryInterface $courseRepository)
-    {
+    /**
+     * @var TagRepositoryInterface
+     */
+    protected $tagRepository;
+
+    /**
+     * CourseService constructor.
+     * 
+     * @param CourseRepositoryInterface $courseRepository
+     * @param TagRepositoryInterface $tagRepository
+     */
+    public function __construct(
+        CourseRepositoryInterface $courseRepository,
+        TagRepositoryInterface $tagRepository
+    ) {
         $this->courseRepository = $courseRepository;
+        $this->tagRepository = $tagRepository;
     }
 
+    /**
+     * Get all courses.
+     * 
+     * @return \Illuminate\Database\Eloquent\Collection
+     */
     public function getAllCourses()
     {
-        return $this->courseRepository->all();
+        return $this->courseRepository->all(['*'], ['user', 'subcategory.category', 'tags']);
     }
 
-    public function getCourseById($id)
+    /**
+     * Get published courses.
+     * 
+     * @param int $perPage
+     * @return \Illuminate\Pagination\LengthAwarePaginator
+     */
+    public function getPublishedCourses($perPage = 10)
     {
-        return $this->courseRepository->find($id);
+        return $this->courseRepository->getPublishedCourses($perPage);
     }
 
-    public function getCourseWithVideos($id)
-    {
-        return $this->courseRepository->getWithVideos($id);
-    }
-
-    public function getCourseWithEnrollments($id)
-    {
-        return $this->courseRepository->getWithEnrollments($id);
-    }
-
-    public function createCourse(array $data)
-    {
-        // Generate slug from name
-        $data['slug'] = Str::slug($data['name']);
-        
-        return $this->courseRepository->create($data);
-    }
-
-    public function updateCourse($id, array $data)
-    {
-        // Update slug if name is changed
-        if (isset($data['name'])) {
-            $data['slug'] = Str::slug($data['name']);
-        }
-        
-        return $this->courseRepository->update($id, $data);
-    }
-
-    public function deleteCourse($id)
-    {
-        return $this->courseRepository->delete($id);
-    }
-
+    /**
+     * Get courses by mentor.
+     * 
+     * @param int $mentorId
+     * @return \Illuminate\Database\Eloquent\Collection
+     */
     public function getCoursesByMentor($mentorId)
     {
-        return $this->courseRepository->getByMentor($mentorId);
+        return $this->courseRepository->getCoursesByMentor($mentorId);
     }
 
-    public function getCoursesByCategory($categoryId)
+    /**
+     * Get course by ID.
+     * 
+     * @param int $id
+     * @return Course
+     */
+    public function getCourseById($id)
     {
-        return $this->courseRepository->getByCategory($categoryId);
+        return $this->courseRepository->findById($id, ['*'], ['user', 'subcategory.category', 'tags', 'videos']);
     }
 
-    public function getCoursesBySubcategory($subcategoryId)
+    /**
+     * Get course by slug.
+     * 
+     * @param string $slug
+     * @return Course|null
+     */
+    public function getCourseBySlug($slug)
     {
-        return $this->courseRepository->getBySubcategory($subcategoryId);
+        return $this->courseRepository->getCourseBySlug($slug);
     }
 
-    public function getCoursesByTag($tagId)
+    /**
+     * Get course with videos.
+     * 
+     * @param int $courseId
+     * @return Course|null
+     */
+    public function getCourseWithVideos($courseId)
     {
-        return $this->courseRepository->getByTag($tagId);
+        return $this->courseRepository->getCourseWithVideos($courseId);
     }
 
-    public function getCoursesByStatus($status)
+    /**
+     * Get course with tags.
+     * 
+     * @param int $courseId
+     * @return Course|null
+     */
+    public function getCourseWithTags($courseId)
     {
-        return $this->courseRepository->getByStatus($status);
+        return $this->courseRepository->getCourseWithTags($courseId);
     }
 
-    public function attachTags($courseId, array $tagIds)
+    /**
+     * Get course with enrollments.
+     * 
+     * @param int $courseId
+     * @return Course|null
+     */
+    public function getCourseWithEnrollments($courseId)
     {
-        return $this->courseRepository->attachTags($courseId, $tagIds);
+        return $this->courseRepository->getCourseWithEnrollments($courseId);
     }
 
-    public function detachTags($courseId, array $tagIds)
+    /**
+     * Create new course.
+     * 
+     * @param array $data
+     * @return Course
+     */
+    public function createCourse(array $data)
     {
-        return $this->courseRepository->detachTags($courseId, $tagIds);
+        // Generate slug
+        $data['slug'] = Str::slug($data['title']);
+        
+        // Handle thumbnail if provided
+        if (isset($data['thumbnail']) && $data['thumbnail']) {
+            $thumbnail = $data['thumbnail'];
+            $filename = Str::random(20) . '.' . $thumbnail->getClientOriginalExtension();
+            $thumbnail->storeAs('public/courses', $filename);
+            $data['thumbnail'] = 'courses/' . $filename;
+        }
+        
+        // By default, course is not published
+        if (!isset($data['is_published'])) {
+            $data['is_published'] = false;
+        }
+        
+        // Create course
+        $course = $this->courseRepository->create($data);
+        
+        // Sync tags if provided
+        if (isset($data['tags']) && is_array($data['tags'])) {
+            $this->tagRepository->syncWithCourse($course->id, $data['tags']);
+        }
+        
+        return $course;
+    }
+
+    /**
+     * Update course.
+     * 
+     * @param int $id
+     * @param array $data
+     * @return bool
+     */
+    public function updateCourse($id, array $data)
+    {
+        $course = $this->courseRepository->findById($id);
+        
+        // Generate slug if title is provided
+        if (isset($data['title'])) {
+            $data['slug'] = Str::slug($data['title']);
+        }
+        
+        // Handle thumbnail if provided
+        if (isset($data['thumbnail']) && $data['thumbnail']) {
+            // Delete old thumbnail
+            if ($course->thumbnail && Storage::exists('public/' . $course->thumbnail)) {
+                Storage::delete('public/' . $course->thumbnail);
+            }
+            
+            $thumbnail = $data['thumbnail'];
+            $filename = Str::random(20) . '.' . $thumbnail->getClientOriginalExtension();
+            $thumbnail->storeAs('public/courses', $filename);
+            $data['thumbnail'] = 'courses/' . $filename;
+        }
+        
+        // Update course
+        $result = $this->courseRepository->update($id, $data);
+        
+        // Sync tags if provided
+        if (isset($data['tags']) && is_array($data['tags'])) {
+            $this->tagRepository->syncWithCourse($id, $data['tags']);
+        }
+        
+        return $result;
+    }
+
+    /**
+     * Delete course.
+     * 
+     * @param int $id
+     * @return bool
+     */
+    public function deleteCourse($id)
+    {
+        $course = $this->courseRepository->findById($id);
+        
+        // Delete thumbnail if exists
+        if ($course->thumbnail && Storage::exists('public/' . $course->thumbnail)) {
+            Storage::delete('public/' . $course->thumbnail);
+        }
+        
+        return $this->courseRepository->deleteById($id);
+    }
+
+    /**
+     * Publish course.
+     * 
+     * @param int $courseId
+     * @return bool
+     */
+    public function publishCourse($courseId)
+    {
+        return $this->courseRepository->publishCourse($courseId);
+    }
+
+    /**
+     * Unpublish course.
+     * 
+     * @param int $courseId
+     * @return bool
+     */
+    public function unpublishCourse($courseId)
+    {
+        return $this->courseRepository->unpublishCourse($courseId);
+    }
+
+    /**
+     * Search courses.
+     * 
+     * @param string $query
+     * @param int $perPage
+     * @return \Illuminate\Pagination\LengthAwarePaginator
+     */
+    public function searchCourses($query, $perPage = 10)
+    {
+        return $this->courseRepository->searchCourses($query, $perPage);
     }
 }

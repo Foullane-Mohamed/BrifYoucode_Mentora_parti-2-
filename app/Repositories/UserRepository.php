@@ -2,38 +2,81 @@
 
 namespace App\Repositories;
 
+use App\Models\Role;
 use App\Models\User;
+use App\Repositories\BaseRepository;
 use App\Repositories\Interfaces\UserRepositoryInterface;
+use Illuminate\Database\Eloquent\Collection;
 
 class UserRepository extends BaseRepository implements UserRepositoryInterface
 {
+    /**
+     * UserRepository constructor.
+     * 
+     * @param User $model
+     */
     public function __construct(User $model)
     {
         parent::__construct($model);
     }
 
-    public function getByRole($roleId)
+    /**
+     * @inheritDoc
+     */
+    public function getUsersByRole(string $role): Collection
     {
-        return $this->model->where('role_id', $roleId)->get();
+        return $this->model->whereHas('roles', function ($query) use ($role) {
+            $query->where('name', $role);
+        })->get();
     }
 
-    public function getWithProfile($id)
+    /**
+     * @inheritDoc
+     */
+    public function assignRole(int $userId, string $roleName): bool
     {
-        return $this->model->with('profile')->findOrFail($id);
+        $user = $this->findById($userId);
+        $role = Role::where('name', $roleName)->firstOrFail();
+        
+        if (!$user->hasRole($roleName)) {
+            $user->roles()->attach($role);
+            return true;
+        }
+        
+        return false;
     }
 
-    public function getWithCourses($id)
+    /**
+     * @inheritDoc
+     */
+    public function removeRole(int $userId, string $roleName): bool
     {
-        return $this->model->with('courses')->findOrFail($id);
+        $user = $this->findById($userId);
+        $role = Role::where('name', $roleName)->firstOrFail();
+        
+        if ($user->hasRole($roleName)) {
+            $user->roles()->detach($role);
+            return true;
+        }
+        
+        return false;
     }
 
-    public function getWithEnrollments($id)
+    /**
+     * @inheritDoc
+     */
+    public function hasRole(int $userId, string $roleName): bool
     {
-        return $this->model->with('enrollments')->findOrFail($id);
+        $user = $this->findById($userId);
+        return $user->hasRole($roleName);
     }
 
-    public function getWithBadges($id)
+    /**
+     * @inheritDoc
+     */
+    public function hasPermission(int $userId, string $permissionName): bool
     {
-        return $this->model->with('badges')->findOrFail($id);
+        $user = $this->findById($userId);
+        return $user->hasPermission($permissionName);
     }
 }

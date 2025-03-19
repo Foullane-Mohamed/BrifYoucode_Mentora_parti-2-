@@ -3,46 +3,99 @@
 namespace App\Repositories;
 
 use App\Models\Enrollment;
+use App\Repositories\BaseRepository;
 use App\Repositories\Interfaces\EnrollmentRepositoryInterface;
+use Carbon\Carbon;
+use Illuminate\Database\Eloquent\Collection;
 
 class EnrollmentRepository extends BaseRepository implements EnrollmentRepositoryInterface
 {
+    /**
+     * EnrollmentRepository constructor.
+     * 
+     * @param Enrollment $model
+     */
     public function __construct(Enrollment $model)
     {
         parent::__construct($model);
     }
 
-    public function getByCourse($courseId)
+    /**
+     * @inheritDoc
+     */
+    public function getEnrollmentsByUser(int $userId): Collection
     {
-        return $this->model->where('course_id', $courseId)->get();
+        return $this->model->where('user_id', $userId)
+            ->with(['course.user', 'course.subcategory.category'])
+            ->get();
     }
 
-    public function getByStudent($studentId)
+    /**
+     * @inheritDoc
+     */
+    public function getEnrollmentsByCourse(int $courseId): Collection
     {
-        return $this->model->where('user_id', $studentId)->get();
+        return $this->model->where('course_id', $courseId)
+            ->with('user')
+            ->get();
     }
 
-    public function getByStatus($status)
+    /**
+     * @inheritDoc
+     */
+    public function getEnrollmentsByStatus(string $status): Collection
     {
-        return $this->model->where('status', $status)->get();
+        return $this->model->where('status', $status)
+            ->with(['user', 'course.user'])
+            ->get();
     }
 
-    public function updateStatus($id, $status)
+    /**
+     * @inheritDoc
+     */
+    public function getEnrollmentByUserAndCourse(int $userId, int $courseId): ?Enrollment
     {
-        $enrollment = $this->find($id);
-        $enrollment->status = $status;
-        $enrollment->save();
-        return $enrollment;
+        return $this->model->where('user_id', $userId)
+            ->where('course_id', $courseId)
+            ->first();
     }
 
-    public function updateProgress($id, $progress)
+    /**
+     * @inheritDoc
+     */
+    public function updateEnrollmentStatus(int $enrollmentId, string $status): bool
     {
-        $enrollment = $this->find($id);
-        $enrollment->progress = $progress;
+        $enrollment = $this->findById($enrollmentId);
+        return $enrollment->update(['status' => $status]);
+    }
+
+    /**
+     * @inheritDoc
+     */
+    public function updateEnrollmentProgress(int $enrollmentId, float $progress): bool
+    {
+        $enrollment = $this->findById($enrollmentId);
+        
+        $data = ['progress' => $progress];
+        
+        // If progress is 100%, mark as completed
         if ($progress >= 100) {
-            $enrollment->completed_at = now();
+            $data['completed_at'] = Carbon::now();
         }
-        $enrollment->save();
-        return $enrollment;
+        
+        return $enrollment->update($data);
+    }
+
+    /**
+     * @inheritDoc
+     */
+    public function completeEnrollment(int $enrollmentId): bool
+    {
+        $enrollment = $this->findById($enrollmentId);
+        
+        return $enrollment->update([
+            'progress' => 100,
+            'completed_at' => Carbon::now()
+        ]);
     }
 }
