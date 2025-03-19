@@ -16,8 +16,6 @@ return new class extends Migration
             $table->integer('progress')->default(0); // percentage
             $table->timestamp('completed_at')->nullable();
             $table->timestamps();
-            
-            // Ensure a student can only enroll once in a course
             $table->unique(['user_id', 'course_id']);
         });
     }
