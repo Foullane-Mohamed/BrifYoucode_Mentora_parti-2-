@@ -115,3 +115,8 @@ Route::prefix('v1')->middleware('auth:sanctum')->group(function () {
     Route::get('/statistics/enrollments/monthly', [StatisticsController::class, 'getMonthlyEnrollmentStatistics']);
     Route::get('/statistics/courses/by-level', [StatisticsController::class, 'getCourseStatisticsByLevel']);
 });
+
+
+Route::get('/test', function () {
+  return response()->json(['message' => 'Test route works!']);
+});
